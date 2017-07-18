@@ -1,0 +1,320 @@
+---
+title: "Home Decor Improvement Website & App Analysis"
+author: "Jayanti Trivedi"
+date: "6/21/2017"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#Imports required packages
+```{r}
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(reshape2)
+```
+
+#Reads files using read.csv
+```{r}
+signups <- read.csv("signups.csv")
+visits <- read.csv("visits.csv")
+```
+
+#Checks the structure of dataframes
+```{r}
+head(signups)
+head(visits)
+```
+There's an additional column X in both dataframes, which is unrequired, since we have uid. So, we should drop this column.
+
+#Drops column X from both the signups and visits dataframes
+```{r}
+signups$X <- NULL
+visits$X <- NULL
+```
+
+#Checks the summary of columns of both the dataframes to get an idea of the values present in the columns
+```{r}
+summary(signups)
+summary(visits)
+```
+
+#Checks for NAs in signups and visits dataframe and if there are, then gives the count for each column
+```{r}
+print("Number of NAs in signups dataframe")
+colSums(is.na(signups))
+
+print("Number of NAs in visits dataframe")
+colSums(is.na(visits))
+```
+The data is clean, since there are no NAs.
+
+#Changes the data type of columns to required type
+```{r}
+signups$device <- as.factor(signups$device)
+signups$signup_dt <- as.Date(signups$signup_dt)
+
+visits$dt <- as.Date(visits$dt)
+```
+
+
+#Frequency distribution of users by different devices
+```{r}
+ggplot(signups) + geom_bar(aes(x = device, group = device), fill = "gold", color = "maroon") +
+  ggtitle("Distribution of signed up users by different devices") +
+  xlab("Device") +
+  ylab("Frequency")
+```
+
+#Frequency distribution of users by different Auth type
+```{r}
+ggplot(signups) + geom_bar(aes(x = auth_type, group = auth_type), fill = "gold", color = "maroon") +
+  ggtitle("Distribution of signed up users by different Authorization type") +
+  xlab("Authorization Type") +
+  ylab("Frequency")
+```
+
+#Frequency distribution of users by different device, auth type combination
+```{r}
+ggplot(signups) + geom_bar(aes(x = device, fill = auth_type, group = interaction(device, auth_type))) +
+  ggtitle("Distribution of signed up users by different device and authentication method") +
+  xlab("Device") +
+  ylab("Frequency")
+```
+
+### Builds a table, and generates a heatmap to understand, for users who signed up on Jun 1 2016, what proportion of them came back in the 1st week (Jun 2 – Jun 8 2016), in the 2nd week (Jun 9 – Jun 15 2016), in the 3rd week (Jun 16 – Jun 22 2016) etc. all the way upto 24 weeks. (I.e.) If I signup on Jun 1, and visit on Jun 12, Jun 13, Jun 18 and Jul 15, I would be counted as visited in the 2nd week (Note: Jun 12 and 13 are part of the same week, so I get counted only once), visited in the 3rd week and visited in the 7th week. Includes all signup dates until Oct 30 2016. This is to understand at roughly what week does this reach a steady state.
+
+#Filters signups till October 30 2016. Counts total signups on each day and saves in a column named "#signedup"
+```{r}
+signup_oct30 <- subset(signups, signup_dt <= as.Date("2016-10-30")) %>%
+  group_by(signup_dt) %>%
+  mutate("#signedup" = n())
+```
+
+#Merges signup_oct30 with visits for signups till October 30th
+```{r}
+merged_visits <- merge(signup_oct30, visits, by = "uid")
+```
+
+#Verifies the data type of each column
+```{r}
+str(merged_visits)
+```
+
+#Creates a new column for visited week after signup
+```{r}
+merged_visits$visited_week <- ceiling((merged_visits$dt - merged_visits$signup_dt)/7)
+```
+
+#Removes duplicate visits in 1 week for each uid
+```{r}
+unique_week_visits <- merged_visits[!duplicated(merged_visits[, c("uid","visited_week")]),]
+```
+
+#Transforms the data to wide format with each row a signup_date, as required
+```{r}
+t_wide <- dcast(unique_week_visits, signup_dt ~ visited_week)
+```
+
+#Gets #signedup column for each sign up date
+```{r}
+signups_eachdate <- unique_week_visits[!duplicated(unique_week_visits[,c("signup_dt","#signedup")]),
+                                       c("signup_dt","#signedup")]
+```
+
+#Merges above 2 dataframes, retaining only required weeks and calculates percentage
+```{r}
+q2_finaldata <- merge(t_wide, signups_eachdate, by = "signup_dt")
+
+#Retains required columns
+q2_finaldata <- q2_finaldata[,c(1,3:26,51)]
+
+#Calculates percentages
+q2_finaldata[, -c(1,26)] <- round(q2_finaldata[, -c(1,26)]/q2_finaldata[,26]*100,2)
+
+#Brings column in required order
+q2_finaldata <- q2_finaldata[,c(1,26,2:25)]
+```
+
+#Creates Heatmap
+```{r}
+#Gives rownames for heatmap
+row.names(q2_finaldata) <- q2_finaldata$signup_dt
+
+#Takes only required 24 columns for heatmaps
+q2_finaldata <- q2_finaldata[,3:26]
+
+#Converts dataframe to matrix format
+q2_matrix <- data.matrix(q2_finaldata)
+
+#Generates heatmap
+signup_heatmap <- heatmap(q2_matrix, Rowv=NA, Colv=NA, 
+                          col = topo.colors(16), scale="none", margins=c(4,10))
+```
+> Evident from the heatmap, from week 8, we see a near consistent darkish blue color, which symbolizes that the visits have reached a steady state.
+
+
+#Similar to the above table created, lets build it for just two days – 24th July 2016 and 18th Aug 2016, but segmented by auth type to understand if the retention varies by different auth types
+
+#Filters for dates 24th July 2016 and 18th Aug 2016, groups by signup_dt and auth_time and finally merges with visits
+```{r}
+#Groups by signup_dt and auth_type
+signup_julaug <- subset(signups, signup_dt == as.Date("2016-07-24") | 
+                          signup_dt == as.Date("2016-08-18")) %>%
+  group_by(signup_dt, auth_type) %>%
+  mutate("#signedup" = n())
+
+#Merges the grouped dataframe to visits
+merged_visits_q3 <- merge(signup_julaug, visits, by = "uid")
+```
+
+#Creates visited week column for each user ID and removes multiple visits in 1 week
+```{r}
+merged_visits_q3$visited_week <- ceiling((merged_visits_q3$dt - merged_visits_q3$signup_dt)/7)
+
+unique_week_visits_q3 <- merged_visits_q3[!duplicated(merged_visits_q3[, c("uid","visited_week")]),]
+```
+
+#Transforms the data to wide format with each row a signup_date and auth type, as required
+```{r}
+t_wide_q3 <- dcast(unique_week_visits_q3, signup_dt + auth_type ~ visited_week)
+```
+
+#Gets #signedup for each signup_dt and auth_type
+```{r}
+signups_eachdate_q3 <- 
+  unique_week_visits_q3[!duplicated(unique_week_visits_q3[,c("signup_dt",
+                                                             "auth_type","#signedup")]),
+                                             c("signup_dt","auth_type","#signedup")]
+```
+
+#Merges #signedup with wide data and calculates final percentages
+```{r}
+q3_finaldata <- merge(t_wide_q3, signups_eachdate_q3, by = c("signup_dt","auth_type"))
+
+#Retains only required columns
+q3_finaldata <- q3_finaldata[,c(1:2,44,4:27)]
+
+#Calculates the percentage of users visiting in each week
+q3_finaldata[, -c(1,2,3)] <- q3_finaldata[, -c(1,2,3)]/q3_finaldata[,3]*100
+```
+
+#Transforms data into martrix format and creates heatmap
+```{r}
+#Gives row names
+row.names(q3_finaldata) <- paste(q3_finaldata$signup_dt, q3_finaldata$auth_type, sep = " ")
+
+#Takes only required 24 columns
+q3_finaldata_hm <- q3_finaldata[,4:27]
+
+#Converts to matrix
+q3_matrix <- data.matrix(q3_finaldata_hm)
+
+#Creates the heatmap
+signup_heatmap_q3 <- heatmap(q3_matrix, Rowv=NA, Colv=NA, 
+                             col = topo.colors(16), scale="none", margins=c(5,5))
+```
+
+#Changes the format of data to long to be plotted as line graph
+```{r}
+graph_transformed <- melt(q3_finaldata)
+graph_transformed <- graph_transformed[13:156,]
+```
+
+#Plots line graph for each authentication type for required dates
+```{r}
+ggplot(graph_transformed, aes(variable, value, group=factor(auth_type))) + 
+  geom_line(aes(color=auth_type)) +
+  xlab("Week") +
+  ylab("Percentage Visiting") +
+  ggtitle("Retention of users by authorization type on 24th July 2016 and 18th Aug 2016")
+```
+> From week 1-5, auth type C has a higher retention than auth type A and B. 
+From week 5-14, auth type B has an unusual rise in retention when compared to other auth types.  
+From week 15 till the end, auth type B and C have a similar retention.
+In week 23, suddenly auth type A gives highest retention. 
+Overall, auth type A has given lowest retention compared to B and C.
+
+
+#Let’sunderstand for users who signed up on Jun 1 2016, what proportion of them came back after signing up, for the first time within 1 week (Jun 2 – Jun 8 2016), first time within 2 weeks (Jun 2 – Jun 15 2016) , first time within 3 weeks (Jun 2 – 22 2016) etc. all the way upto within 24 weeks. Includes all the signup dates until Oct 30 2016. Also, let's learn on an avg, what proportion of users don’t come back even after 24 weeks.
+
+
+#Creates required dataframe for question 4
+Assumption: As we have to only consider returning users from week one which starts the next day of signup, I will not consider users returning on same day.
+```{r}
+#Removes users visiting on same day
+unique_rows_rem0 <- unique_week_visits[!unique_week_visits$visited_week ==0,]
+
+#Gets week of first visit and creates #signedup column
+uniquedata_q4 <- unique_rows_rem0 %>%
+  group_by(uid) %>%
+  summarise(firstvisited_week = min(visited_week),
+            signup_dt = min(signup_dt),
+            "#signedup" = min(`#signedup`))
+
+#Creates a new column named 'value' with values as 1
+uniquedata_q4$value <- 1
+```
+
+Before transformation to wide format, there needs to be complete cases of all weeks present for all signup dates in the data. So, adding dummy rows with value 0 for visited weeks not present for each sign up date
+```{r}
+uniquedata_q4 <- uniquedata_q4 %>%
+  complete(nesting(signup_dt), firstvisited_week = seq(1L, 47, 1L), fill = list(value = 0))
+```
+
+#Finds cumulative sum of weeks for each signup date
+```{r}
+cumulative_q4 <- uniquedata_q4 %>%
+  group_by(signup_dt, firstvisited_week) %>%
+  summarise(value = sum(value)) %>%
+  mutate(csum_week = cumsum(value))
+```
+
+#Transforms the data into wide format and merges with total signups
+```{r}
+t_wide_q4 <- dcast(cumulative_q4, signup_dt ~ firstvisited_week, value.var = "csum_week")
+
+q4_finaldata <- merge(t_wide_q4, signups_eachdate, by = "signup_dt")
+```
+
+#Calculates number of users who don't come back even after 24th week. Also calculates final percentages
+```{r}
+q4_finaldata$dont_comeback <- (q4_finaldata$`#signedup`) - (q4_finaldata$`47`)
+
+q4_finaldata[, -c(1,49)] <- round(q4_finaldata[, -c(1,49)]/q4_finaldata[,49]*100,2)
+```
+
+#Brings the dataframe in required format
+```{r}
+q4_finaldata <- q4_finaldata[,-c(26:48)]
+q4_finaldata <- q4_finaldata[,c(1,26,2:25,27)]
+```
+
+#Creates heatmap
+```{r}
+#Gives rownames for heatmap
+row.names(q4_finaldata) <- q4_finaldata$signup_dt
+
+#Takes only required 24 columns for heatmaps
+q4_finaldata_hm <- q4_finaldata[,3:26]
+
+#Converts dataframe to matrix format
+q4_matrix <- data.matrix(q4_finaldata_hm)
+
+#Generates heatmap
+signup_heatmap_q4 <- heatmap(q4_matrix, Rowv=NA, Colv=NA, 
+                             col = topo.colors(16), scale="none", margins=c(4,10))
+```
+
+#Calculates average proportion of users who don't come back even after 24 weeks
+Assumption: Assuming we have all the data for visits taken by customer after signups
+```{r}
+avg_dont_comeback <- round(mean(q4_finaldata$dont_comeback),2)
+
+print(paste0("Average proportion of users who don't come back even after 24 weeks is ", 
+             avg_dont_comeback, "%"))
+```
+> After careful analysis, it is seen that 11.44% of users don’t visit the website or app ever after sign up.
